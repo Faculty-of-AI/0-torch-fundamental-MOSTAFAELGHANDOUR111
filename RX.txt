@@ -1,0 +1,109 @@
+#include <ESP8266WiFi.h>
+#include <espnow.h>
+#include <Servo.h>
+
+// دبابيس المواتير
+#define ENA D1
+#define IN1 D2
+#define IN2 D3
+#define IN3 D4
+#define IN4 D5
+#define ENB D6
+
+// دبابيس الـ Ultrasonic والسيرفو
+#define TRIG_PIN D8
+#define ECHO_PIN D7
+#define SERVO_PIN D0
+
+Servo myServo;
+
+struct DataStruct {
+  int x; 
+  int y;
+} myData;
+
+long duration;
+int distance;
+
+void OnDataRecv(uint8_t * mac, uint8_t *incomingData, uint8_t len) {
+  memcpy(&myData, incomingData, sizeof(myData));
+  
+  int speed = myData.x; 
+  int turn = myData.y;
+
+  if (abs(speed) < 50) speed = 0;
+  if (abs(turn) < 50) turn = 0;
+
+  // التحكم في الحركة
+  if (speed > 50) moveForward(abs(speed));
+  else if (speed < -50) moveBackward(abs(speed));
+  else if (turn > 70) turnRight(abs(turn));
+  else if (turn < -70) turnLeft(abs(turn));
+  else stopMotors();
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  // إعداد دبابيس المواتير
+  pinMode(ENA, OUTPUT); pinMode(IN1, OUTPUT); pinMode(IN2, OUTPUT);
+  pinMode(IN3, OUTPUT); pinMode(IN4, OUTPUT); pinMode(ENB, OUTPUT);
+
+  // إعداد الـ Ultrasonic والسيرفو
+  pinMode(TRIG_PIN, OUTPUT);
+  pinMode(ECHO_PIN, INPUT);
+  myServo.attach(SERVO_PIN);
+  myServo.write(0); // وضع البداية للسيرفو
+
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != 0) return;
+
+  esp_now_set_self_role(ESP_NOW_ROLE_SLAVE);
+  esp_now_register_recv_cb(OnDataRecv);
+}
+
+void loop() {
+  // قياس المسافة باستمرار
+  digitalWrite(TRIG_PIN, LOW);
+  delayMicroseconds(2);
+  digitalWrite(TRIG_PIN, HIGH);
+  delayMicroseconds(10);
+  digitalWrite(TRIG_PIN, LOW);
+
+  duration = pulseIn(ECHO_PIN, HIGH);
+  distance = duration * 0.034 / 2;
+
+  // إذا كانت المسافة أقل من 30 سم
+  if (distance > 0 && distance <= 30) {
+    myServo.write(180); // تحريك السيرفو لـ 180 درجة
+  } else {
+    myServo.write(0);   // الرجوع لـ 0 درجة لو المسافة أمان
+  }
+
+  delay(100); // تأخير بسيط لراحة السنسور
+}
+
+// دالات الحركة (نفس الدالات السابقة بدون تغيير)
+void moveForward(int s) {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  analogWrite(ENA, s); analogWrite(ENB, s);
+}
+void moveBackward(int s) {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  analogWrite(ENA, s); analogWrite(ENB, s);
+}
+void turnRight(int s) {
+  digitalWrite(IN1, HIGH); digitalWrite(IN2, LOW);
+  digitalWrite(IN3, LOW); digitalWrite(IN4, HIGH);
+  analogWrite(ENA, s); analogWrite(ENB, s);
+}
+void turnLeft(int s) {
+  digitalWrite(IN1, LOW); digitalWrite(IN2, HIGH);
+  digitalWrite(IN3, HIGH); digitalWrite(IN4, LOW);
+  analogWrite(ENA, s); analogWrite(ENB, s);
+}
+void stopMotors() {
+  analogWrite(ENA, 0); analogWrite(ENB, 0);
+}

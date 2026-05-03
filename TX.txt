@@ -1,0 +1,77 @@
+#include <Adafruit_MPU6050.h>
+#include <Adafruit_Sensor.h>
+#include <Wire.h>
+#include <ESP8266WiFi.h>
+#include <espnow.h>
+
+Adafruit_MPU6050 mpu;
+
+// عنوان الماك الخاص ببوردة العربية اللي استخرجناه
+uint8_t broadcastAddress[] = {0x80, 0x7D, 0x3A, 0x55, 0x87, 0x0B};
+
+// هيكل البيانات (يجب أن يتطابق تماماً مع كود المستقبل)
+struct DataStruct {
+  int x; // للأمام والخلف
+  int y; // لليمين واليسار
+} myData;
+
+// دالة للتأكد من وصول البيانات (اختياري للمتابعة)
+void OnDataSent(uint8_t *mac_addr, uint8_t sendStatus) {
+  Serial.print("\r\nLast Packet Send Status: ");
+  if (sendStatus == 0){
+    Serial.println("Delivery Success");
+  } else {
+    Serial.println("Delivery Fail");
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  
+  // تشغيل بروتوكول I2C (SDA=D2, SCL=D1)
+  Wire.begin(D2, D1);
+
+  // تشغيل الحساس MPU6050
+  if (!mpu.begin()) {
+    Serial.println("Failed to find MPU6050 chip");
+    while (1) { delay(10); }
+  }
+  Serial.println("MPU6050 Found!");
+
+  // إعدادات الواي فاي لبروتوكول ESP-NOW
+  WiFi.mode(WIFI_STA);
+  if (esp_now_init() != 0) {
+    Serial.println("Error initializing ESP-NOW");
+    return;
+  }
+
+  // تعريف البوردة كمرسل وتسجيل دالة المتابعة
+  esp_now_set_self_role(ESP_NOW_ROLE_CONTROLLER);
+  esp_now_register_send_cb(OnDataSent);
+  
+  // إضافة بوردة العربية كـ Peer
+  esp_now_add_peer(broadcastAddress, ESP_NOW_ROLE_SLAVE, 1, NULL, 0);
+  
+  Serial.println("TX Setup Complete!");
+}
+
+void loop() {
+  sensors_event_t a, g, temp;
+  mpu.getEvent(&a, &g, &temp);
+
+  /* تحويل قيم التسارع (Acceleration) لمدى سرعة الموتور (0-255)
+     المحور X: للأمام والخلف
+     المحور Y: لليمين واليسار
+  */
+  myData.x = map(a.acceleration.x, -10, 10, -255, 255);
+  myData.y = map(a.acceleration.y, -10, 10, -255, 255);
+
+  // إرسال البيانات
+  esp_now_send(broadcastAddress, (uint8_t *) &myData, sizeof(myData));
+
+  // طباعة القيم للتأكد من الحساسية
+  Serial.print("X: "); Serial.print(myData.x);
+  Serial.print(" | Y: "); Serial.println(myData.y);
+
+  delay(20); // سرعة تحديث عالية جداً لتحكم سلس
+}
